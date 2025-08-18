@@ -30,3 +30,6 @@ data/
 *.xlsx
 *.parquet
 *.feather
+
+# но разрешаем папку data/results
+!data/results/
