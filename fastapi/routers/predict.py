@@ -2,6 +2,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Dict, Any, List
 from io import BytesIO
+import numpy as np
 import pandas as pd
 
 from schemas import Features, PredictResponse, PredictCSVResponse, PredictItem
@@ -14,23 +15,55 @@ def ping():
     return {"msg": "pong"}
 
 def _safe_get_pipeline():
-    """Отдельная функция, чтобы красиво ловить ошибки загрузки модели."""
+    """Аккуратно загружаем модель, чтобы отдавать понятные ошибки."""
     try:
         return get_pipeline()
     except FileNotFoundError as e:
-        # Чётко подсветим, что не найден файл модели/препроцессора
         raise HTTPException(status_code=500, detail=f"Model file not found: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Model load error: {e}")
+
+def _infer_labels_and_probs(pipe, X: pd.DataFrame, threshold: float):
+    """
+    Универсальный инференс:
+      - если есть predict_proba -> берём proba[:,1]
+      - elif есть decision_function -> применяем сигмоиду как эвристику и порог
+      - else -> берём predict(), а "вероятность" = {0.0, 1.0}
+    Возвращает: (labels: np.ndarray[int], probs: np.ndarray[float])
+    """
+    if hasattr(pipe, "predict_proba"):
+        probs = pipe.predict_proba(X)[:, 1]
+        labels = (probs >= threshold).astype(int)
+        return labels, probs
+
+    if hasattr(pipe, "decision_function"):
+        scores = pipe.decision_function(X)
+        # Эвристика: приводим к [0,1] через сигмоиду.
+        # Это не калиброванные вероятности, но даёт понятную шкалу.
+        probs = 1.0 / (1.0 + np.exp(-scores))
+        labels = (probs >= threshold).astype(int)
+        return labels, probs
+
+    # Фолбэк: только predict()
+    preds = pipe.predict(X)
+    # делаем вид, что это "жёсткая" вероятность
+    probs = preds.astype(float)
+    labels = preds.astype(int)
+    return labels, probs
 
 @router.post("/predict", response_model=PredictResponse, summary="Предсказание по одному объекту")
 def predict_one(payload: Features):
     pipe = _safe_get_pipeline()
     try:
-        X = pd.DataFrame([payload.model_dump(exclude_none=True)])
-        proba = float(pipe.predict_proba(X)[:, 1][0])
-        label = int(proba >= get_threshold())
-        return PredictResponse(label=label, proba=proba)
+        data: Dict[str, Any] = payload.model_dump(exclude_none=True)
+        if not data:
+            raise ValueError("Тело запроса пустое — отправьте хотя бы один признак.")
+        X = pd.DataFrame([data])
+        thr = get_threshold()
+        labels, probs = _infer_labels_and_probs(pipe, X, thr)
+        return PredictResponse(label=int(labels[0]), proba=float(probs[0]))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Prediction error: {e}")
 
@@ -47,20 +80,17 @@ async def predict_csv(file: UploadFile = File(...)):
 
     try:
         content = await file.read()
-
-        # 1-я попытка: стандартный CSV с запятой
+        # 1-я попытка — обычный CSV (запятая)
         df = pd.read_csv(BytesIO(content))
-
-        # Если прочлась одна большая колонка, попробуем ; как разделитель
+        # если получилась одна колонка — попробуем ';'
         if df.shape[1] == 1:
             df = pd.read_csv(BytesIO(content), sep=";")
 
         if df.empty:
             raise ValueError("CSV пустой")
 
-        probs = pipe.predict_proba(df)[:, 1]
         thr = get_threshold()
-        labels = (probs >= thr).astype(int)
+        labels, probs = _infer_labels_and_probs(pipe, df, thr)
 
         items: List[PredictItem] = [
             PredictItem(row_id=int(i), label=int(l), proba=float(p))
@@ -79,8 +109,14 @@ async def predict_csv(file: UploadFile = File(...)):
 @router.get("/model_status", summary="Проверка, что модель загрузилась")
 def model_status():
     try:
-        _ = get_threshold()
-        _ = get_pipeline()
-        return {"ok": True}
+        pipe = _safe_get_pipeline()
+        status = {
+            "ok": True,
+            "has_predict_proba": bool(hasattr(pipe, "predict_proba")),
+            "has_decision_function": bool(hasattr(pipe, "decision_function")),
+            "has_predict": bool(hasattr(pipe, "predict")),
+            "threshold": get_threshold(),
+        }
+        return status
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
