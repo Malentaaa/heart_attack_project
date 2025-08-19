@@ -23,3 +23,7 @@ statsmodels==0.14.5
 
 # Утилиты
 joblib==1.5.1
+
+fastapi
+uvicorn
+pydantic
