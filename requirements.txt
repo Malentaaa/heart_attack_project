@@ -27,3 +27,4 @@ joblib==1.5.1
 fastapi
 uvicorn
 pydantic
+python-multipart
