@@ -6,9 +6,8 @@ import re
 import numpy as np
 import pandas as pd
 
-from schemas import Features, PredictResponse, PredictCSVResponse, PredictItem
-from deps.model import get_pipeline, get_threshold, get_expected_features
-
+from ..schemas import Features, PredictResponse, PredictCSVResponse, PredictItem
+from ..deps.model import get_pipeline, get_threshold, get_expected_features
 router = APIRouter()
 
 # -------------------- УТИЛИТЫ --------------------
