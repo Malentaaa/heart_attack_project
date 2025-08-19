@@ -26,6 +26,5 @@ def get_pipeline():
             return model
     except Exception:
         pass
-    preproc = joblib.load(PREP_PATH)
     from sklearn.pipeline import Pipeline
     return Pipeline(steps=[("prep", preproc), ("clf", model)])
