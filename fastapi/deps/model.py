@@ -7,9 +7,9 @@ import json
 import joblib
 
 # === пути к артефактам ===
-MODELS_DIR       = Path(__file__).resolve().parents[2] / "models"
-MODEL_PATH       = MODELS_DIR / "heart_rf_final.pkl"   # ваш файл модели
-THRESHOLD_PATH   = MODELS_DIR / "threshold.json"       # (необязательно)
+MODELS_DIR        = Path(__file__).resolve().parents[2] / "models"
+MODEL_PATH        = MODELS_DIR / "heart_rf_final.pkl"   # ваш файл модели
+THRESHOLD_PATH    = MODELS_DIR / "threshold.json"       # (необязательно)
 DEFAULT_THRESHOLD = 0.5
 
 def _register_custom_classes():
@@ -19,8 +19,8 @@ def _register_custom_classes():
     чтобы joblib смог распаковать модель.
     """
     candidate_modules = [
-        "src.custom_transformers",      # наш модуль с кастомными трансформерами
-        "src.custom_imputers",          # вдруг ты уже создавала этот файл ранее
+        "src.custom_transformers",      # ваш модуль с кастомными трансформерами
+        "src.custom_imputers",          # если раньше создавали этот файл
         "src.modeling.dataprocessor",
         "src.dataprocessor",
         "dataprocessor",
@@ -34,8 +34,8 @@ def _register_custom_classes():
         "MissingIndicatorSimple",
     ]
 
-    found_any = False
     import types
+    found_any = False
     for mod_name in candidate_modules:
         try:
             mod = importlib.import_module(mod_name)
@@ -52,7 +52,7 @@ def _register_custom_classes():
                 found_any = True
 
     if not found_any:
-        # Фолбэк: no-op классы, чтобы хотя бы загрузить модель (не рекомендуется для боевой работы)
+        # Фолбэк: no-op классы, чтобы хотя бы загрузить модель (для продакшена нежелательно)
         try:
             from sklearn.base import BaseEstimator, TransformerMixin
             class GroupMedianImputer(BaseEstimator, TransformerMixin):
@@ -95,10 +95,5 @@ def get_pipeline():
         raise FileNotFoundError(f"Файл модели не найден: {MODEL_PATH}")
 
     model = joblib.load(MODEL_PATH)
-
-    if not hasattr(model, "predict_proba"):
-        raise AttributeError(
-            "Загруженный объект не имеет метода predict_proba. "
-            "Если это не классификатор с вероятностями, адаптируйте эндпоинт под decision_function/predict."
-        )
+    # Не требуем наличия predict_proba — поддержим разные варианты в роутере
     return model
