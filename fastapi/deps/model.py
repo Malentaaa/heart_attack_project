@@ -1,30 +1,79 @@
 # fastapi/deps/model.py
 from functools import lru_cache
 from pathlib import Path
+import importlib
+import sys
 import json
 import joblib
 
-MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
-MODEL_PATH = MODELS_DIR / "heart_rf_final.pkl"
-THRESHOLD_PATH = MODELS_DIR / "threshold.json"
+# === пути к артефактам ===
+MODELS_DIR      = Path(__file__).resolve().parents[2] / "models"
+MODEL_PATH      = MODELS_DIR / "heart_rf_final.pkl"   # <-- ваш файл модели
+THRESHOLD_PATH  = MODELS_DIR / "threshold.json"       # (необязательно)
 DEFAULT_THRESHOLD = 0.5
+
+def _register_custom_classes():
+    """
+    Если модель сохранена из ноутбука, внутри pickle могут быть ссылки на __main__.ClassName.
+    Здесь пробуем найти ваши кастомные трансформеры в коде проекта и
+    положить их в модуль __main__, чтобы joblib смог их восстановить.
+    Добавьте сюда свои пути/имена классов при необходимости.
+    """
+    # где может лежать ваш кастомный трансформер
+    candidate_modules = [
+        "src.modeling.dataprocessor",
+        "src.dataprocessor",
+        "dataprocessor",
+        "src.transformers",
+        "transformers",
+    ]
+    custom_class_names = [
+        "GroupMedianImputer",  # добавляйте сюда другие свои классы при необходимости
+    ]
+
+    for mod_name in candidate_modules:
+        try:
+            mod = importlib.import_module(mod_name)
+        except Exception:
+            continue
+
+        for cls_name in custom_class_names:
+            if hasattr(mod, cls_name):
+                cls = getattr(mod, cls_name)
+                main = sys.modules.get("__main__")
+                if main is None:
+                    import types
+                    main = types.ModuleType("__main__")
+                    sys.modules["__main__"] = main
+                setattr(main, cls_name, cls)
 
 @lru_cache
 def get_threshold() -> float:
     try:
         with open(THRESHOLD_PATH, "r", encoding="utf-8") as f:
-            return float(json.load(f).get("threshold", DEFAULT_THRESHOLD))
+            data = json.load(f)
+        return float(data.get("threshold", DEFAULT_THRESHOLD))
     except FileNotFoundError:
         return DEFAULT_THRESHOLD
 
 @lru_cache
 def get_pipeline():
+    """
+    Загружает единственный pickle с моделью/пайплайном.
+    Если внутри pickle — sklearn.Pipeline с препроцессорами, всё равно ок.
+    """
+    _register_custom_classes()  # важно выполнить ДО joblib.load
+
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"Файл модели не найден: {MODEL_PATH}")
+
     model = joblib.load(MODEL_PATH)
-    try:
-        from sklearn.pipeline import Pipeline
-        if isinstance(model, Pipeline):
-            return model
-    except Exception:
-        pass
-    from sklearn.pipeline import Pipeline
-    return Pipeline(steps=[("prep", preproc), ("clf", model)])
+
+    # проверим, что сможем получить вероятность
+    if not hasattr(model, "predict_proba"):
+        raise AttributeError(
+            "Загруженный объект не имеет метода predict_proba. "
+            "Убедитесь, что сохраняли модель/пайплайн с поддержкой вероятностей "
+            "(например, RandomForestClassifier) или адаптируйте эндпоинт под decision_function."
+        )
+    return model
