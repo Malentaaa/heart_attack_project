@@ -5,12 +5,14 @@ import importlib
 import sys
 import json
 import joblib
+from typing import Any, Tuple, List, Dict
 
 # === пути к артефактам ===
 MODELS_DIR        = Path(__file__).resolve().parents[2] / "models"
 MODEL_PATH        = MODELS_DIR / "heart_rf_final.pkl"   # ваш файл модели
 THRESHOLD_PATH    = MODELS_DIR / "threshold.json"       # (необязательно)
 DEFAULT_THRESHOLD = 0.5
+
 
 def _register_custom_classes():
     """
@@ -77,6 +79,83 @@ def _register_custom_classes():
         except Exception:
             pass
 
+
+def _is_estimator(x: Any) -> bool:
+    return any(hasattr(x, attr) for attr in ("predict_proba", "decision_function", "predict"))
+
+
+def _unwrap_model(container: Any) -> Any:
+    """
+    Приводит загруженный pickle к пригодному для инференса объекту (Estimator/Pipeline).
+    Поддерживает частые схемы упаковки: dict, tuple, list, уже готовый Pipeline/Model.
+    Бросает ValueError с подсказкой, если не получилось.
+    """
+    # Уже готовый estimator/pipeline?
+    if _is_estimator(container):
+        return container
+
+    # sklearn Pipeline?
+    try:
+        from sklearn.pipeline import Pipeline
+        if isinstance(container, Pipeline):
+            return container
+    except Exception:
+        pass
+
+    # Словарь с типичными ключами
+    if isinstance(container, dict):
+        keys = set(container.keys())
+
+        # 1) Наиболее вероятное — целиком pipeline
+        for k in ("pipeline", "pipe", "best_pipeline", "final_pipeline"):
+            if k in container and _is_estimator(container[k]):
+                return container[k]
+
+        # 2) Модель + препроцессор
+        model_key_candidates = ("model", "clf", "estimator", "best_model", "final_model")
+        prep_key_candidates  = ("preprocessor", "prep", "transformer", "preproc", "ct")
+
+        model_obj = next((container[k] for k in model_key_candidates if k in container), None)
+        prep_obj  = next((container[k] for k in prep_key_candidates if k in container), None)
+        if _is_estimator(model_obj) and prep_obj is not None:
+            # Соберём Pipeline вручную
+            from sklearn.pipeline import Pipeline
+            return Pipeline(steps=[("prep", prep_obj), ("clf", model_obj)])
+
+        # 3) Только модель внутри словаря
+        if _is_estimator(model_obj):
+            return model_obj
+
+        # 4) Перебор всех значений словаря — вдруг estimator лежит под нестандартным ключом
+        for v in container.values():
+            if _is_estimator(v):
+                return v
+
+        # Нечего распаковать
+        # ограничим вывод ключей, чтобы ошибка была читабельной
+        shown_keys = list(keys)[:10]
+        raise ValueError(
+            f"В файле {MODEL_PATH.name} найден dict без пригодной модели. Ключи: {shown_keys} ..."
+        )
+
+    # Кортеж/список: ищем (preproc, model) или просто model
+    if isinstance(container, (tuple, list)):
+        # сначала — поиск estimator внутри
+        for v in container:
+            if _is_estimator(v):
+                return v
+        # попробуем особый случай: (preproc, model)
+        if len(container) == 2:
+            a, b = container
+            if _is_estimator(b):
+                return b
+
+    # Не удалось
+    raise ValueError(
+        f"Не удалось распаковать объект типа {type(container)} до модели с predict/predict_proba."
+    )
+
+
 @lru_cache
 def get_threshold() -> float:
     try:
@@ -86,6 +165,7 @@ def get_threshold() -> float:
     except FileNotFoundError:
         return DEFAULT_THRESHOLD
 
+
 @lru_cache
 def get_pipeline():
     # Зарегистрируем кастомные классы ПЕРЕД загрузкой модели
@@ -94,6 +174,6 @@ def get_pipeline():
     if not MODEL_PATH.exists():
         raise FileNotFoundError(f"Файл модели не найден: {MODEL_PATH}")
 
-    model = joblib.load(MODEL_PATH)
-    # Не требуем наличия predict_proba — поддержим разные варианты в роутере
+    container = joblib.load(MODEL_PATH)
+    model = _unwrap_model(container)
     return model
