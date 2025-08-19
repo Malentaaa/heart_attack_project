@@ -189,6 +189,15 @@ def model_status():
     try:
         pipe = _safe_get_pipeline()
         feats = get_expected_features()
+
+        # соберём список шагов пайплайна (имя шага + класс)
+        pipeline_steps = []
+        try:
+            for name, obj in getattr(pipe, "steps", []):
+                pipeline_steps.append({"name": name, "type": type(obj).__name__})
+        except Exception:
+            pass
+
         return {
             "ok": True,
             "has_predict_proba": bool(hasattr(pipe, "predict_proba")),
@@ -196,10 +205,10 @@ def model_status():
             "has_predict": bool(hasattr(pipe, "predict")),
             "threshold": get_threshold(),
             "expected_features": feats,
+            "pipeline_steps": pipeline_steps,   # <-- теперь видно порядок шагов
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 # -------------------- ИНФЕРЕНС --------------------
 
 @router.post("/predict", response_model=PredictResponse, summary="Предсказание по одному объекту")

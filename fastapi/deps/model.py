@@ -12,6 +12,7 @@ MODELS_DIR        = Path(__file__).resolve().parents[2] / "models"
 MODEL_PATH        = MODELS_DIR / "heart_rf_final.pkl"   # ваш файл модели
 THRESHOLD_PATH    = MODELS_DIR / "threshold.json"       # (необязательно)
 DEFAULT_THRESHOLD = 0.5
+EXPECTED_JSON     = MODELS_DIR / "expected_features.json"
 
 
 def _register_custom_classes():
@@ -86,74 +87,112 @@ def _is_estimator(x: Any) -> bool:
 
 def _unwrap_model(container: Any) -> Any:
     """
-    Приводит загруженный pickle к пригодному для инференса объекту (Estimator/Pipeline).
-    Поддерживает частые схемы упаковки: dict, tuple, list, уже готовый Pipeline/Model.
-    Бросает ValueError с подсказкой, если не получилось.
+    Возвращаем пригодный для инференса sklearn.Pipeline / Estimator.
+    Если это Pipeline — гарантируем порядок prep -> selector? -> clf.
+    Если clf не найден, бросаем понятную ошибку со списком шагов.
     """
-    # Уже готовый estimator/pipeline?
-    if _is_estimator(container):
-        return container
+    from sklearn.pipeline import Pipeline
 
-    # sklearn Pipeline?
+    def _is_estimator_like(obj: Any) -> bool:
+        return any(hasattr(obj, a) for a in ("predict_proba", "decision_function", "predict"))
+
+    def _role(name: str, obj: Any) -> str:
+        n = (name or "").lower()
+        # явный препроцессор по типу/названию
+        try:
+            from sklearn.compose import ColumnTransformer
+            if isinstance(obj, ColumnTransformer):
+                return "prep"
+        except Exception:
+            pass
+        if any(k in n for k in ("prep", "preproc", "preprocessor", "ct", "transformer")):
+            return "prep"
+        # селектор
+        try:
+            from sklearn.feature_selection._base import SelectorMixin
+            if isinstance(obj, SelectorMixin):
+                return "sel"
+        except Exception:
+            pass
+        if any(k in n for k in ("select", "kbest", "selector", "fs", "feature_select")):
+            return "sel"
+        # модель
+        if any(k in n for k in ("clf", "model", "estimator", "rf", "xgb", "lgb", "svc", "logreg")):
+            return "clf"
+        if _is_estimator_like(obj):
+            return "clf"
+        return "other"
+
+    def _reorder_pipeline(p: Pipeline) -> Pipeline:
+        steps = list(p.steps)
+        roles = [(_role(n, o), n, o) for (n, o) in steps]
+        prep = next(((i, n, o) for i, (r, n, o) in enumerate(roles) if r == "prep"), None)
+        sel  = next(((i, n, o) for i, (r, n, o) in enumerate(roles) if r == "sel"), None)
+        clf  = next(((i, n, o) for i, (r, n, o) in enumerate(roles) if r == "clf"), None)
+
+        if clf is None:
+            names = [n for _, n, _ in roles]
+            raise ValueError(f"В Pipeline не найден классификатор (последний шаг). Шаги: {names}")
+
+        new_steps = []
+        if prep: new_steps.append((prep[1], prep[2]))
+        if sel:  new_steps.append((sel[1],  sel[2]))
+        new_steps.append((clf[1], clf[2]))  # clf строго последним
+
+        # добавим прочие, не дублируя
+        core = {n for n, _ in new_steps}
+        for n, o in steps:
+            if n not in core:
+                new_steps.append((n, o))
+
+        return Pipeline(new_steps)
+
+    # --- распаковка контейнера ---
+    # 1) Уже Pipeline?
     try:
         from sklearn.pipeline import Pipeline
         if isinstance(container, Pipeline):
-            return container
+            return _reorder_pipeline(container)
     except Exception:
         pass
 
-    # Словарь с типичными ключами
+    # 2) Просто estimator?
+    if _is_estimator(container):
+        return container
+
+    # 3) dict
     if isinstance(container, dict):
-        keys = set(container.keys())
+        # готовый pipeline по ключу
+        for k in ("pipeline", "pipe", "final_pipeline", "best_pipeline"):
+            if k in container:
+                obj = container[k]
+                if isinstance(obj, Pipeline):
+                    return _reorder_pipeline(obj)
+                if _is_estimator(obj):
+                    return obj
+        # собрать из частей: preprocessor -> selector? -> model
+        model_obj = next((container.get(k) for k in ("model","clf","estimator","best_model","final_model") if k in container), None)
+        prep_obj  = next((container.get(k) for k in ("preprocessor","prep","transformer","preproc","ct") if k in container), None)
+        sel_obj   = next((container.get(k) for k in ("selector","kbest","feature_selector","feature_selection","fs","select") if k in container), None)
+        if prep_obj is not None and model_obj is not None:
+            return Pipeline([("prep", prep_obj), *([("select", sel_obj)] if sel_obj is not None else []), ("clf", model_obj)])
 
-        # 1) Наиболее вероятное — целиком pipeline
-        for k in ("pipeline", "pipe", "best_pipeline", "final_pipeline"):
-            if k in container and _is_estimator(container[k]):
-                return container[k]
-
-        # 2) Модель + препроцессор
-        model_key_candidates = ("model", "clf", "estimator", "best_model", "final_model")
-        prep_key_candidates  = ("preprocessor", "prep", "transformer", "preproc", "ct")
-
-        model_obj = next((container[k] for k in model_key_candidates if k in container), None)
-        prep_obj  = next((container[k] for k in prep_key_candidates if k in container), None)
-        if _is_estimator(model_obj) and prep_obj is not None:
-            # Соберём Pipeline вручную
-            from sklearn.pipeline import Pipeline
-            return Pipeline(steps=[("prep", prep_obj), ("clf", model_obj)])
-
-        # 3) Только модель внутри словаря
-        if _is_estimator(model_obj):
-            return model_obj
-
-        # 4) Перебор всех значений словаря — вдруг estimator лежит под нестандартным ключом
+        # любой estimator среди значений
         for v in container.values():
             if _is_estimator(v):
                 return v
 
-        # Нечего распаковать
-        # ограничим вывод ключей, чтобы ошибка была читабельной
-        shown_keys = list(keys)[:10]
-        raise ValueError(
-            f"В файле {MODEL_PATH.name} найден dict без пригодной модели. Ключи: {shown_keys} ..."
-        )
+        raise ValueError(f"dict без пригодной модели/препроцессора. Ключи: {list(container.keys())[:12]} ...")
 
-    # Кортеж/список: ищем (preproc, model) или просто model
+    # 4) tuple/list — ищем estimator
     if isinstance(container, (tuple, list)):
-        # сначала — поиск estimator внутри
         for v in container:
             if _is_estimator(v):
                 return v
-        # попробуем особый случай: (preproc, model)
-        if len(container) == 2:
-            a, b = container
-            if _is_estimator(b):
-                return b
+        if len(container) == 2 and _is_estimator(container[1]):
+            return container[1]
 
-    # Не удалось
-    raise ValueError(
-        f"Не удалось распаковать объект типа {type(container)} до модели с predict/predict_proba."
-    )
+    raise ValueError(f"Не удалось распаковать объект типа {type(container)} до модели с predict/predict_proba.")
 
 
 @lru_cache
@@ -177,3 +216,48 @@ def get_pipeline():
     container = joblib.load(MODEL_PATH)
     model = _unwrap_model(container)
     return model
+
+@lru_cache
+def get_expected_features() -> List[str]:
+    """
+    Возвращает список СЫРЫХ признаков, которые ожидает пайплайн.
+    Порядок важен (ставим как в feature_names_in_).
+    Источники:
+      1) feature_names_in_ у препроцессора/модели (если есть)
+      2) models/expected_features.json (если есть)
+      3) иначе — пустой список (тогда нормализация в роутере мягкая)
+    """
+    pipe = get_pipeline()
+
+    # 1) Прямо на объекте
+    for obj in (pipe, getattr(pipe, "preprocessor", None)):
+        if obj is not None and hasattr(obj, "feature_names_in_"):
+            try:
+                return list(getattr(obj, "feature_names_in_"))
+            except Exception:
+                pass
+
+    # 1.1) Если это sklearn.Pipeline — попробуем по шагам
+    try:
+        steps = getattr(pipe, "named_steps", {})
+        for name in ("prep", "preprocessor", "transformer", "ct"):
+            if name in steps and hasattr(steps[name], "feature_names_in_"):
+                return list(getattr(steps[name], "feature_names_in_"))
+    except Exception:
+        pass
+
+    # 2) Файл-список (опционально)
+    try:
+        if EXPECTED_JSON.exists():
+            import json
+            with open(EXPECTED_JSON, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "features" in data:
+                return list(data["features"])
+            if isinstance(data, list):
+                return list(data)
+    except Exception:
+        pass
+
+    # 3) Не нашли — вернём пустой список
+    return []
