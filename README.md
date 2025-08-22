@@ -96,6 +96,8 @@ project_heart_attack/
 ├── requirements.txt # Зависимости проекта
 └── README.md # Описание проекта
 
+---
+
 🚀 Установка и запуск
 
 1. Клонировать репозиторий:
@@ -114,6 +116,7 @@ project_heart_attack/
    ```bash
    jupyter notebook
 
+---
 
 🚀 FastAPI-сервис (готов)
 
@@ -126,12 +129,13 @@ project_heart_attack/
 🩺 GET /api/model_status — проверка, что модель загрузилась (порог, шаги пайплайна, ожидаемые фичи).
 ❤️ GET /health — простой health-check.
 
+---
+
 ⚙️ Установка и запуск
 1) Клонировать и войти в проект
 git clone https://github.com/Malentaaa/heart_attack_project.git
 cd project_heart_attack
 
-2) Виртуальное окружение и зависимости
 python -m venv .venv
 indows PowerShell:
 .\.venv\Scripts\Activate.ps1
@@ -152,12 +156,11 @@ uvicorn app_backend.app:app --reload --port 8001
 
 
 Открой:
-
 Веб-страница: http://127.0.0.1:8001/
-
 Swagger: http://127.0.0.1:8001/docs
-
 Статус модели: http://127.0.0.1:8001/api/model_status
+
+---
 
 📁 Структура бэкенда
 app_backend/
@@ -172,6 +175,7 @@ app_backend/
    ├─ __init__.py
    └─ model.py           # загрузка модели, threshold, expected_features
 
+---
 
 Артефакты модели:
 
@@ -179,6 +183,9 @@ models/
 ├─ heart_rf_final.pkl          # {"pipeline": sklearn.Pipeline, "threshold": float}
 ├─ expected_features.json      # список "сырых" колонок, которых ждёт препроцессор
 └─ threshold.json (опц.)       # {"threshold": 0.39} — имеет приоритет над pkl
+
+
+---
 
 🔌 Эндпоинты
 GET /
@@ -236,6 +243,8 @@ POST /api/predict (application/json)
 
 Необязательные поля можно опустить — их обработает препроцессор.
 
+---
+
 🧠 Про модель
 
 Экспорт выполняется из ноутбука: конвейер Pipeline(prep → select → clf) сохраняется вместе с порогом классификации.
@@ -255,6 +264,8 @@ CSV
 curl -X POST http://127.0.0.1:8001/api/predict_csv \
   -F "file=@data/processed/heart_test.csv"
 
+---
+
 🛠️ Частые проблемы и решения
 
 Страница не открывается / 404 на “/”
@@ -273,6 +284,8 @@ NaN и SelectKBest ругается
 
 {"threshold": 0.39}
 
+---
+
 📦 Используемые библиотеки
 
 pandas, numpy — работа с данными
@@ -283,6 +296,8 @@ xgboost, lightgbm, catboost — градиентный бустинг
 shap — интерпретация моделей
 fastapi, uvicorn — REST API
 
+---
+
 📈 Планы по развитию
 
 Базовый EDA и предобработка данных
@@ -291,6 +306,8 @@ fastapi, uvicorn — REST API
 Реализация FastAPI-сервиса (страница + REST API)
 Docker-контейнеризация проекта
 Деплой модели на облачный сервис
+
+---
 
 👨‍💻 Автор
 Проект выполнен Толстокоровой К.В. в рамках учебного курса по Data Science.
