@@ -7,13 +7,13 @@
 
 ---
 
-## 📊 Датасет
+📊 Датасет
 
 - Учебный набор данных, предоставленный в рамках курса.  
 - Всего **23 признака**, включая демографические данные, медицинские показатели и образ жизни.  
 - Целевая переменная: `heart_attack_risk_binary` (0 — нет, 1 — риск сердечного приступа).
 
-### Примеры признаков:
+Примеры признаков:
 - `age` — возраст  
 - `heart_rate` — пульс  
 - `bmi` — индекс массы тела  
@@ -25,7 +25,7 @@
 
 ---
 
-## 🔬 Методология
+🔬 Методология
 
 Этапы анализа:
 
@@ -62,7 +62,7 @@
 
 ---
 
-## 📈 Результаты
+📈 Результаты
 
 **Лучшая модель**: Random Forest (с подбором порога по F2).  
 
@@ -81,7 +81,7 @@
 
 ---
 
-## 📂 Структура проекта  
+📂 Структура проекта  
 
 project_heart_attack/
 ├── notebooks/ # Jupyter ноутбуки (EDA, моделирование)
@@ -96,7 +96,7 @@ project_heart_attack/
 ├── requirements.txt # Зависимости проекта
 └── README.md # Описание проекта
 
-## 🚀 Установка и запуск
+🚀 Установка и запуск
 
 1. Клонировать репозиторий:
    ```bash
@@ -127,37 +127,37 @@ project_heart_attack/
 ❤️ GET /health — простой health-check.
 
 ⚙️ Установка и запуск
-# 1) Клонировать и войти в проект
+1) Клонировать и войти в проект
 git clone https://github.com/Malentaaa/heart_attack_project.git
 cd project_heart_attack
 
-# 2) Виртуальное окружение и зависимости
+2) Виртуальное окружение и зависимости
 python -m venv .venv
-# Windows PowerShell:
+indows PowerShell:
 .\.venv\Scripts\Activate.ps1
-# macOS/Linux:
-# source .venv/bin/activate
+MacOS/Linux:
+source .venv/bin/activate
 
 pip install -r requirements.txt
 
-# 3) Убедиться, что артефакты модели на месте
-#   models/heart_rf_final.pkl — конвейер sklearn (prep → select → clf) + threshold
-#   models/expected_features.json — список "сырых" признаков (порядок колонок)
-#   models/threshold.json (необязательно) — если есть, переопределяет порог инференса
+3) Убедиться, что артефакты модели на месте
+models/heart_rf_final.pkl — конвейер sklearn (prep → select → clf) + threshold
+models/expected_features.json — список "сырых" признаков (порядок колонок)
+models/threshold.json (необязательно) — если есть, переопределяет порог инференса
 
-# 4) Запуск API
-# Важно: запускаем из корня проекта
+4) Запуск API
+Важно: запускаем из корня проекта
 set PYTHONPATH=.
 uvicorn app_backend.app:app --reload --port 8001
 
 
 Открой:
 
-Веб-страница: http://127.0.0.1:8000/
+Веб-страница: http://127.0.0.1:8001/
 
-Swagger: http://127.0.0.1:8000/docs
+Swagger: http://127.0.0.1:8001/docs
 
-Статус модели: http://127.0.0.1:8000/api/model_status
+Статус модели: http://127.0.0.1:8001/api/model_status
 
 📁 Структура бэкенда
 app_backend/
@@ -246,12 +246,12 @@ expected_features.json — список колонок сырого входа (
 threshold.json (опционально) — если присутствует, имеет приоритет над порогом из .pkl.
 
 🧪 Примеры (curl)
-# одно наблюдение
+одно наблюдение
 curl -X POST http://127.0.0.1:8001/api/predict \
   -H "Content-Type: application/json" \
   -d "{\"age\":58, \"cholesterol\":220, \"gender\":\"male\"}"
 
-# CSV
+CSV
 curl -X POST http://127.0.0.1:8001/api/predict_csv \
   -F "file=@data/processed/heart_test.csv"
 
