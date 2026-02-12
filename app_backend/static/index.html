@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Загрузка CSV и предсказания риска</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0c1024; --bg2:#111537; --card:#141a3f;
+      --stroke:#28306a; --text:#eef0ff; --muted:#b8c0ffb0;
+      --accent:#7b5cff; --accent2:#4cc9f0;
+      --ok:#22c55e; --bad:#ef4444;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; color:var(--text); font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,"Noto Sans",sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, #1a1f51, transparent), var(--bg);
+      display:flex; align-items:flex-start; justify-content:center; padding:40px 16px;
+    }
+    .wrap{width:min(980px,100%)}
+    h1{margin:0 0 22px; font-weight:800; letter-spacing:.2px}
+    .card{
+      background: linear-gradient(180deg, #191f4b, #0f1333);
+      border:1px solid var(--stroke); border-radius:18px; padding:22px;
+      box-shadow: 0 14px 44px rgba(0,0,0,.35);
+    }
+
+    .note{display:none;margin:0 0 14px;padding:10px 12px;border-radius:10px;font-size:14px;border:1px solid #2b336b;background:#121741;color:#dfe2ff}
+    .note.show{display:block}
+    .note.error{border-color:#5d1f27;background:#1a0e13;color:#ffdada}
+    .note.success{border-color:#1f5d3a;background:#0f1b14;color:#dbffe6}
+
+    .dropzone{
+      border:2px dashed #5157a6; border-radius:12px; padding:22px; text-align:center;
+      transition:.2s transform,.2s border-color,.2s background;
+      background:#0f1538;
+    }
+    .dropzone.drag{transform:scale(0.99); border-color:var(--accent2); background:#0c1233}
+    .file-input{display:block;margin:10px auto 0;color:var(--text)}
+    .hint{color:var(--muted); font-size:13px; margin-top:8px}
+
+    .btn{
+      display:block; width:100%; margin-top:18px; padding:14px 18px; font-size:16px; font-weight:700;
+      border:0; border-radius:14px; cursor:pointer; color:white;
+      background:linear-gradient(90deg,var(--accent),var(--accent2));
+      box-shadow:0 10px 28px rgba(123,92,255,.25);
+      transition:.15s transform;
+    }
+    .btn:active{transform:translateY(1px)}
+    .btn:disabled{opacity:.55; cursor:not-allowed}
+
+    .summary{display:none;margin-top:16px;padding:14px;border-radius:12px;background:#102517;border:1px solid #1f5b32}
+    .kpi{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px}
+    .kpi span{background:#0c1a12;border:1px solid #1b3c28;padding:8px 10px;border-radius:10px}
+
+    .list{display:none;margin-top:14px;background:#10143b;border:1px solid #293064;border-radius:14px;max-height:360px;overflow:auto}
+    .row{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #21275b}
+    .row:last-child{border-bottom:0}
+    .badge{display:inline-flex;align-items:center;gap:8px;font-weight:700}
+    .dot{width:10px;height:10px;border-radius:999px}
+    .dot.ok{background:var(--ok);box-shadow:0 0 0 3px rgba(34,197,94,.12)}
+    .dot.bad{background:var(--bad);box-shadow:0 0 0 3px rgba(239,68,68,.12)}
+    .proba{color:#c3c8ff;font-variant-numeric:tabular-nums}
+
+    footer{margin-top:18px;color:var(--muted);font-size:12px}
+    a{color:#9eb5ff}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Загрузка CSV и предсказания риска</h1>
+    <div class="card">
+      <div id="note" class="note"></div>
+
+      <div id="dz" class="dropzone">
+        <div>Перетащите сюда CSV или выберите файл</div>
+        <input id="file" class="file-input" type="file" accept=".csv" />
+        <div class="hint">Файл должен содержать те же столбцы, что и при обучении модели.</div>
+      </div>
+
+      <button id="run" class="btn">Сделать предсказание</button>
+
+      <div id="summary" class="summary">
+        <div><b>Предсказания готовы!</b></div>
+        <div class="kpi">
+          <span><b>Всего:</b> <span id="k-total">0</span></span>
+          <span><b>Класс 1:</b> <span id="k-pos">0</span></span>
+          <span><b>Класс 0:</b> <span id="k-neg">0</span></span>
+        </div>
+      </div>
+
+      <div id="list" class="list"></div>
+
+      <footer>API: <a href="/docs" target="_blank">Swagger</a> • <a href="/health" target="_blank">/health</a></footer>
+    </div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('file');
+    const runBtn    = document.getElementById('run');
+    const dz        = document.getElementById('dz');
+    const note      = document.getElementById('note');
+    const summary   = document.getElementById('summary');
+    const list      = document.getElementById('list');
+    const kTotal    = document.getElementById('k-total');
+    const kPos      = document.getElementById('k-pos');
+    const kNeg      = document.getElementById('k-neg');
+
+    function showNote(text, type='info'){
+      note.textContent = text;
+      note.className = 'note show' + (type==='error' ? ' error' : (type==='success' ? ' success' : ''));
+    }
+    function hideNote(){ note.className = 'note'; }
+
+    // drag&drop
+    ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('drag'); }));
+    ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('drag'); }));
+    dz.addEventListener('drop', e => { fileInput.files = e.dataTransfer.files; hideNote(); });
+
+    runBtn.addEventListener('click', async () => {
+      hideNote();
+
+      if (!fileInput.files[0]) {
+        showNote('Выберите CSV-файл.', 'error'); return;
+      }
+      if (!fileInput.files[0].name.toLowerCase().endsWith('.csv')) {
+        showNote('Файл должен иметь расширение .csv', 'error'); return;
+      }
+
+      runBtn.disabled = true;
+      const oldText = runBtn.textContent;
+      runBtn.textContent = 'Обработка…';
+
+      const fd = new FormData();
+      fd.append('file', fileInput.files[0]);
+
+      try {
+        const res  = await fetch('/api/predict_csv', { method: 'POST', body: fd });
+        const text = await res.text();
+
+        if (!res.ok) {
+          try {
+            const obj = JSON.parse(text);
+            throw new Error(obj.detail ?? text);
+          } catch {
+            throw new Error(text || 'Internal Server Error');
+          }
+        }
+
+        const data = JSON.parse(text);
+        // сводка
+        kTotal.textContent = data.total;
+        kPos.textContent   = data.positive;
+        kNeg.textContent   = data.negative;
+        summary.style.display = 'block';
+
+        // список
+        list.innerHTML = '';
+        data.items.forEach(row => {
+          const el = document.createElement('div');
+          el.className = 'row';
+          const ok = row.label === 1; // класс 1 = риск есть
+          el.innerHTML = `
+            <div class="badge"><span>Пациент ${row.row_id}</span></div>
+            <div class="badge"><span class="dot ${ok ? 'bad' : 'ok'}"></span><span>${ok ? 'РИСК ЕСТЬ' : 'РИСКА НЕТ'}</span></div>
+            <div class="proba">${(row.proba * 100).toFixed(1)}%</div>
+          `;
+          list.appendChild(el);
+        });
+        list.style.display = 'block';
+
+        showNote('Предсказания выполнены успешно.', 'success');
+      } catch (e) {
+        showNote('Ошибка: ' + e.message, 'error');
+      } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = oldText;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# Jupyter / работа с ноутбуками
+jupyter==1.1.1
+notebook==7.4.5
+jupyterlab==4.4.5
+ipywidgets==8.1.7
+
+# Базовые библиотеки
+numpy==1.26.4
+pandas==2.3.1
+matplotlib==3.10.5
+seaborn==0.13.2
+scipy==1.16.1
+plotly==6.3.0
+tqdm==4.67.1
+
+# Машинное обучение
+scikit-learn==1.3.2
+xgboost==3.0.4
+lightgbm==4.6.0
+catboost==1.2.8
+shap==0.48.0
+statsmodels==0.14.5
+
+# Утилиты
+joblib==1.5.1
+
+fastapi
+uvicorn
+pydantic
+python-multipart

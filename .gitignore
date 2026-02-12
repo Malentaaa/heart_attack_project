@@ -1,0 +1,35 @@
+# Виртуальное окружение
+.venv/
+venv/
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# Jupyter временные файлы
+.ipynb_checkpoints/
+
+# Данные (если не нужны в гите)
+data/
+*.csv
+*.xlsx
+
+# Настройки
+.env
+
+# окружение и временные
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.env
+
+# данные — не публикуем
+data/
+*.csv
+*.xlsx
+*.parquet
+*.feather
+
+# но разрешаем папку data/results
+!data/results/
